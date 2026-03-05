@@ -64,6 +64,8 @@ dependencies {
         exclude group: 'org.slf4j', module: 'slf4j-api'
     }
 
+    // Pin vulnerable transitive dependency to secure version
+    implementation 'io.undertow:undertow-core:2.3.21.Final'
 
 }
 
