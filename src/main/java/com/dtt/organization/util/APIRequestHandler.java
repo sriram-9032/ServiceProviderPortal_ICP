@@ -9,6 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.List;
+
 @Configuration
 
 public class APIRequestHandler {
@@ -19,12 +23,30 @@ public class APIRequestHandler {
         this.restTemplate = restTemplate;
     }
 
+    private static final List<String> ALLOWED_HOSTS =
+            List.of("email-service.company.com");
+
+    private void validateUrl(String url) {
+        try {
+            URI uri = new URI(url);
+            String host = uri.getHost();
+
+            if (host == null || !ALLOWED_HOSTS.contains(host)) {
+                throw new IllegalArgumentException("Invalid URL host");
+            }
+
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid URL format", e);
+        }
+    }
+
     public ApiResponses handleApiRequest(String url,
                                         HttpMethod method,
                                         HttpEntity<Object> requestEntity) {
 
         try {
 
+            validateUrl(url);
             ResponseEntity<ApiResponses> response =
                     restTemplate.exchange(url, method, requestEntity, ApiResponses.class);
 
@@ -64,4 +86,3 @@ public class APIRequestHandler {
         }
     }
 }
-
