@@ -1,0 +1,290 @@
+package com.dtt.organization.service.impl;
+
+import com.dtt.organization.dto.ApiResponses;
+import com.dtt.organization.dto.LoginRequestDTO;
+import com.dtt.organization.dto.TrustedUserDTO;
+import com.dtt.organization.dto.TrustedUserResponseDTO;
+import com.dtt.organization.model.TrustedUsersEntity;
+import com.dtt.organization.repository.TrustedUsersRepository;
+import com.dtt.organization.service.iface.TrustedUserService;
+import com.dtt.organization.util.APIRequestHandler;
+import com.dtt.organization.util.AppUtil;
+import com.dtt.organization.util.EmailService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.MessageSource;
+import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+
+@Service
+public class TrustedUserServiceImpl implements TrustedUserService {
+    private static final String CLASS = "TrustedUserServiceImpl";
+    private static final Logger logger = LoggerFactory.getLogger(TrustedUserServiceImpl.class);
+
+    @Value("${portal.url}")
+    private String portalUrl;
+
+    @Value("${portal.name}")
+    private String portalName;
+
+    @Value("${spoc.details}")
+    String spocDetails;
+
+
+    private final TrustedUsersRepository trustedUsersRepository;
+    private final EmailService emailService;
+    private final PasswordEncoder passwordEncoder;
+    private final APIRequestHandler apiRequestHandler;
+    private final MessageSource messageSource;
+
+    public TrustedUserServiceImpl(
+            TrustedUsersRepository trustedUsersRepository,
+            EmailService emailService,
+            PasswordEncoder passwordEncoder,
+            APIRequestHandler apiRequestHandler,
+            MessageSource messageSource) {
+
+        this.trustedUsersRepository = trustedUsersRepository;
+        this.emailService = emailService;
+        this.passwordEncoder = passwordEncoder;
+        this.apiRequestHandler = apiRequestHandler;
+        this.messageSource = messageSource;
+    }
+
+
+
+
+
+    @Override
+    public ApiResponses login(LoginRequestDTO dto) {
+        logger.info("{} login  :::" ,CLASS);
+
+        try {
+
+            TrustedUsersEntity auth = trustedUsersRepository.findByEmail(dto.getEmail());
+
+            if (auth == null) {
+                return AppUtil.createApiResponses(
+                        false,
+                        messageSource.getMessage(
+                                "api.error.auth.email.invalid",
+                                null,
+                                 LocaleContextHolder.getLocale()
+                        ),
+                        null
+                );
+            }
+
+            boolean matches = passwordEncoder.matches(dto.getPassword(), auth.getPassword()
+            );
+
+            if (!matches) {
+                return AppUtil.createApiResponses(
+                        false,
+                        messageSource.getMessage(
+                                "api.error.auth.password.invalid",
+                                null,
+                                 LocaleContextHolder.getLocale()
+                        ),
+                        null
+                );
+            }
+
+            return AppUtil.createApiResponses(
+                    true,
+                    messageSource.getMessage(
+                            "api.success.auth.login",
+                            null,
+                             LocaleContextHolder.getLocale()
+                    ),
+                    null
+            );
+        }catch (Exception e){
+            logger.error("{} Error during login | email: {}",
+                    CLASS, dto.getEmail(), e);
+            return AppUtil.createApiResponses(
+                    false,
+                    messageSource.getMessage(
+                            "api.error.auth.login.failed",
+                            null,
+                             LocaleContextHolder.getLocale()
+                    ),
+                    null
+            );
+
+        }
+    }
+
+
+    public ApiResponses saveTrustedUser(TrustedUserDTO trustedUserDTO) {
+        logger.info("{} save trust user :::" ,CLASS);
+        try {
+            TrustedUsersEntity trustedUsersEntity =
+                    trustedUsersRepository.findByEmail(trustedUserDTO.getEmail());
+
+            if (trustedUsersEntity != null) {
+                return AppUtil.createApiResponses(
+                        false,
+                        messageSource.getMessage(
+                                "api.error.trusted.user.already.exists",
+                                null,
+                                 LocaleContextHolder.getLocale()
+                        ),
+                        null
+                );
+            }
+
+            String url = spocDetails + trustedUserDTO.getEmail();
+            logger.info(CLASS + " fetching user details by calling {} ", url);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<Object> requestEntity = new HttpEntity<>(headers);
+
+            ApiResponses spocResponse =
+                    apiRequestHandler.handleApiRequest(
+                            url,
+                            HttpMethod.GET,
+                            requestEntity
+                    );
+
+            if (spocResponse == null || !spocResponse.isSuccess()) {
+                logger.warn("{} Email not found in SPOC details ::: {}",
+                        CLASS, trustedUserDTO.getEmail());
+
+                return AppUtil.createApiResponses(
+                        false,
+                        messageSource.getMessage(
+                                "api.error.trusted.user.not.in.spoc",
+                                null,
+                                 LocaleContextHolder.getLocale()
+                        ),
+                        null
+                );
+            }
+
+            TrustedUsersEntity trustedUsers = new TrustedUsersEntity();
+            trustedUsers.setName(trustedUserDTO.getName());
+            trustedUsers.setEmail(trustedUserDTO.getEmail());
+            trustedUsers.setMobileNumber(trustedUserDTO.getMobileNumber());
+            trustedUsers.setCreatedOn(AppUtil.getDate());
+            trustedUsers.setUpdatedOn(AppUtil.getDate());
+
+
+
+
+            String body =
+                    "<html>" +
+                            "<body style='font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #000;'>" +
+
+                            "<p>Dear " + trustedUserDTO.getName() + ",</p>" +
+
+                            "<p>You are added as Trusted User by Administrator" +
+                            "<p>Kindly Visit <strong>" + portalName + "</strong>" +
+
+
+                            "<p>" +
+                            "<strong>Link:</strong><br/>" +
+                            "<a href='" + portalUrl + "' target='_blank'>" + portalUrl + "</a>" +
+                            "</p>" +
+
+
+                            "<p>Regards,<br/>" +
+                            "Admin</p>" +
+
+                            "<p style='font-size: 10px; font-style: italic; color: gray;'>" +
+                            "* This is an automated email from <strong>" + portalName + "</strong>. " +
+                            "Please contact the administrator if you have any questions regarding this email." +
+                            "</p>" +
+
+                            "</body>" +
+                            "</html>";
+
+
+            trustedUsersRepository.save(trustedUsers);
+            emailService.sendEmail(trustedUserDTO.getEmail(),  body,"Added as Trusted User " + portalName);
+
+
+
+            return AppUtil.createApiResponses(
+                    true,
+                    messageSource.getMessage(
+                            "api.success.trusted.user.saved",
+                            null,
+                             LocaleContextHolder.getLocale()
+                    ),
+                    null
+            );
+
+
+        }catch (Exception e){
+            logger.error("{} Error while saving trusted user | email: {}",
+                    CLASS, trustedUserDTO.getEmail(), e);
+
+            return AppUtil.createApiResponses(
+                    false,
+                    messageSource.getMessage(
+                            "api.error.trusted.user.save.failed",
+                            null,
+                             LocaleContextHolder.getLocale()
+                    ),
+                    null
+            );
+        }
+    }
+
+
+
+
+    @Override
+    public ApiResponses getAllTrustedUsers() {
+        logger.info("{} get all trusted users  :::" ,CLASS);
+        try{
+
+
+            List<TrustedUserResponseDTO> users =
+                    trustedUsersRepository.findAll()
+                            .stream()
+                            .map(user -> {
+                                TrustedUserResponseDTO dto = new TrustedUserResponseDTO();
+                                dto.setId(user.getId());
+                                dto.setName(user.getName());
+                                dto.setEmail(user.getEmail());
+                                dto.setMobileNumber(user.getMobileNumber());
+                                dto.setCreatedOn(user.getCreatedOn());
+                                dto.setUpdatedOn(user.getUpdatedOn());
+                                return dto;
+                            })
+                            .toList();
+
+            return AppUtil.createApiResponses(
+                    true,
+                    messageSource.getMessage(
+                            "api.success.trusted.users.fetched",
+                            null,
+                            LocaleContextHolder.getLocale()
+                    ),
+                    users
+            );
+
+        }catch (Exception e){
+            logger.error("{} Error while fetching trusted users",
+                    CLASS, e);
+            return AppUtil.createApiResponses(false,"Something went wrong",null);
+        }
+    }
+
+
+
+
+
+}
